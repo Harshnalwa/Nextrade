@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: nextrade-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATA_FILE
+        value: /var/data/data.json
+    disk:
+      name: nextrade-data
+      mountPath: /var/data
+      sizeGB: 1
