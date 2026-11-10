@@ -141,7 +141,7 @@ function Login({ onAuth }) {
   return <div className="login"><div className="login-art"><h1>NEX<span>TRADE</span></h1><p>Trade live crypto markets with $100,000 of virtual cash. No risk, real prices.</p><Tape /></div>
     <form onSubmit={submit}><h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
       {mode === 'signup' && <input placeholder="Name" value={f.name} onChange={set('name')} />}
-      <input placeholder="Email" type="email" value={f.email} onChange={set('email')} /><input placeholder="Password" type="password" value={f.password} onChange={set('password')} />
+      <input placeholder="Email" type="email" required autoComplete="email" value={f.email} onChange={set('email')} /><input placeholder="Password" type="password" required minLength={mode === "signup" ? 8 : undefined} maxLength={72} autoComplete={mode === "login" ? "current-password" : "new-password"} value={f.password} onChange={set('password')} />
       {err && <p className="dn">{err}</p>}<button className="buy">{mode === 'login' ? 'Log in' : 'Start trading'}</button>
       <p className="muted" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setErr(''); }} style={{ cursor: 'pointer' }}>{mode === 'login' ? 'New here? Create an account' : 'Have an account? Log in'}</p></form></div>;
 }
