@@ -1,0 +1,11 @@
+node_modules/
+**/node_modules/
+.env
+.env.*
+!.env.example
+backend/data.json
+backend/data.json.tmp
+dist/
+**/dist/
+*.log
+.DS_Store
