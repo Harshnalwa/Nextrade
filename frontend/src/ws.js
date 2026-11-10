@@ -1,33 +1,72 @@
 import { useEffect, useRef, useState } from 'react';
+
 const HOSTS = ['wss://data-stream.binance.vision/stream', 'wss://stream.binance.com:443/stream', 'wss://stream.binance.com:9443/stream'];
-const subs = new Map(), listeners = new Set(); let ws, retry = 0, h = 0, status = 'connecting', msgs = 0;
-const setStatus = s => { status = s; listeners.forEach(f => f(s)); };
+const subscriptions = new Map();
+const statusListeners = new Set();
+let socket = null, retryTimer = null, connectTimer = null, retryCount = 0, hostIndex = 0, status = 'connecting', messages = 0, nextId = 1;
+const setStatus = value => { status = value; statusListeners.forEach(listener => listener(value)); };
+function sendSubscription(method, streams) {
+  if (socket?.readyState === WebSocket.OPEN && streams.length) socket.send(JSON.stringify({ method, params: streams, id: nextId++ }));
+}
+function scheduleReconnect() {
+  if (retryTimer) return;
+  const delay = Math.min(1000 * (2 ** retryCount), 15000);
+  retryCount++;
+  retryTimer = setTimeout(() => { retryTimer = null; connect(); }, delay);
+}
 function connect() {
+  if (socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) return;
+  setStatus('connecting');
   let opened = false;
-  ws = new WebSocket(HOSTS[h % HOSTS.length]);
-  const timer = setTimeout(() => ws.close(), 6000); // give up on a hanging host
-  ws.onopen = () => { opened = true; clearTimeout(timer); retry = 0; setStatus('live'); if (subs.size) ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: [...subs.keys()], id: 1 })); };
-  ws.onmessage = e => { const m = JSON.parse(e.data); msgs++; subs.get(m.stream)?.cbs.forEach(cb => cb(m.data)); };
-  ws.onclose = () => { clearTimeout(timer); if (!opened) h++; setStatus('reconnecting'); setTimeout(connect, Math.min(1000 * 2 ** retry++, 15000)); };
+  try { socket = new WebSocket(HOSTS[hostIndex % HOSTS.length]); }
+  catch { hostIndex++; scheduleReconnect(); return; }
+  const current = socket;
+  connectTimer = setTimeout(() => { if (!opened && current.readyState === WebSocket.CONNECTING) current.close(); }, 8000);
+  current.onopen = () => { opened = true; clearTimeout(connectTimer); retryCount = 0; setStatus('live'); sendSubscription('SUBSCRIBE', [...subscriptions.keys()]); };
+  current.onmessage = event => {
+    try {
+      const message = JSON.parse(event.data);
+      if (message.stream && message.data) {
+        messages++;
+        subscriptions.get(message.stream)?.callbacks.forEach(callback => { try { callback(message.data); } catch (error) { console.error('Stream callback failed:', error); } });
+      }
+    } catch (error) { console.warn('Ignored malformed market stream message:', error); }
+  };
+  current.onerror = () => current.close();
+  current.onclose = () => {
+    clearTimeout(connectTimer);
+    if (socket === current) socket = null;
+    if (!opened) hostIndex++;
+    setStatus('reconnecting');
+    scheduleReconnect();
+  };
 }
 connect();
-export function subscribe(stream, cb) {
-  let s = subs.get(stream);
-  if (!s) { s = { cbs: new Set() }; subs.set(stream, s); if (ws.readyState === 1) ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: [stream], id: 2 })); }
-  s.cbs.add(cb);
-  return () => { s.cbs.delete(cb); if (!s.cbs.size) { subs.delete(stream); if (ws.readyState === 1) ws.send(JSON.stringify({ method: 'UNSUBSCRIBE', params: [stream], id: 3 })); } };
+export function subscribe(stream, callback) {
+  let entry = subscriptions.get(stream);
+  if (!entry) { entry = { callbacks: new Set() }; subscriptions.set(stream, entry); sendSubscription('SUBSCRIBE', [stream]); }
+  entry.callbacks.add(callback);
+  return () => {
+    entry.callbacks.delete(callback);
+    if (!entry.callbacks.size) { subscriptions.delete(stream); sendSubscription('UNSUBSCRIBE', [stream]); }
+  };
 }
 export function useStatus() {
-  const [s, set] = useState(status);
-  useEffect(() => { listeners.add(set); return () => listeners.delete(set); }, []);
-  return s;
+  const [value, setValue] = useState(status);
+  useEffect(() => { statusListeners.add(setValue); setValue(status); return () => statusListeners.delete(setValue); }, []);
+  return value;
 }
-export function useStream(stream, on) {
-  const [d, set] = useState(null), buf = useRef(null), raf = useRef(0);
-  useEffect(() => subscribe(stream, m => {
-    on?.(m); buf.current = m;
-    if (!raf.current) raf.current = requestAnimationFrame(() => { raf.current = 0; set(buf.current); });
-  }), [stream]);
-  return d;
+export function useStream(stream, onMessage) {
+  const [data, setData] = useState(null);
+  const latest = useRef(null), animationFrame = useRef(0);
+  useEffect(() => {
+    const unsubscribe = subscribe(stream, message => {
+      onMessage?.(message);
+      latest.current = message;
+      if (!animationFrame.current) animationFrame.current = requestAnimationFrame(() => { animationFrame.current = 0; setData(latest.current); });
+    });
+    return () => { unsubscribe(); if (animationFrame.current) cancelAnimationFrame(animationFrame.current); };
+  }, [stream, onMessage]);
+  return data;
 }
-export const messageCount = () => msgs;
+export const messageCount = () => messages;
