@@ -58,15 +58,16 @@ export function useStatus() {
 }
 export function useStream(stream, onMessage) {
   const [data, setData] = useState(null);
-  const latest = useRef(null), animationFrame = useRef(0);
+  const latest = useRef(null), animationFrame = useRef(0), callbackRef = useRef(onMessage);
+  useEffect(() => { callbackRef.current = onMessage; }, [onMessage]);
   useEffect(() => {
     const unsubscribe = subscribe(stream, message => {
-      onMessage?.(message);
+      callbackRef.current?.(message);
       latest.current = message;
       if (!animationFrame.current) animationFrame.current = requestAnimationFrame(() => { animationFrame.current = 0; setData(latest.current); });
     });
     return () => { unsubscribe(); if (animationFrame.current) cancelAnimationFrame(animationFrame.current); };
-  }, [stream, onMessage]);
+  }, [stream]);
   return data;
 }
 export const messageCount = () => messages;
